@@ -9,6 +9,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -137,14 +138,17 @@ public class Client {
 
 		//registrando e pedindo o ataque
 		try {
-			//Registry registry = LocateRegistry.getRegistry();
-			Registry registry = LocateRegistry.getRegistry("10.10.10.8");
+			Registry registry = LocateRegistry.getRegistry();
+			//Registry registry = LocateRegistry.getRegistry("10.10.10.8");
 			Master mestre = (Master) registry.lookup("mestre");
 			
 			System.out.println("Cliente: Achei o mestre!");
 			
+			// Transformando bytes em String
+			String vetorCriptografadoString = new String(vetorCriptografado, StandardCharsets.UTF_8);
+			
 			//startTime = System.nanoTime();
-			Guess[] respostas = mestre.attack(vetorCriptografado, myknowntext);
+			Guess[] respostas = mestre.attack(vetorCriptografadoString, knowntext);
 			//endTime = System.nanoTime();
 			
 			//System.out.println("Tempo de Execucao: " + ((endTime - startTime)/1000000) + "ms");

@@ -16,6 +16,13 @@ import java.util.UUID;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 
+import com.sun.messaging.*;
+import com.sun.messaging.Queue;
+
+import javax.jms.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 public class SlaveImpl implements Slave {
 	static Master mestre;
 	private UUID id;
@@ -55,21 +62,6 @@ public class SlaveImpl implements Slave {
 		mestre = (Master) registry.lookup("mestre");
 	}
 	
-	// tarefa para se registrar no mestre
-	public static TimerTask registerTask(Slave s, String slaveName, UUID slavekey) {
-		TimerTask tt = new TimerTask() {
-			public void run() {
-				try {
-					lookupMaster();
-					mestre.addSlave(s, slaveName, slavekey);
-				} catch (Exception e) {
-					System.out.println("Escravo " +slaveName+ ": nao consegui me registrar no mestre! tentando novamente em 30s...");
-				}
-			}
-		};
-		return tt;
-	}
-	
 	public static void main(String[] args) {
 
 		UUID id = UUID.randomUUID();
@@ -77,21 +69,45 @@ public class SlaveImpl implements Slave {
 		String name = (args.length > 0) ? args[0] : "Escravo" + id.toString();
 		
 		SlaveImpl slave = new SlaveImpl(id, name);
+
+		String host = (args.length < 1) ? "127.0.0.1" : args[0];
 		
 		try {
+			Logger.getLogger("").setLevel(Level.INFO);
 			
-			Slave objref = (Slave) UnicastRemoteObject.exportObject(slave, 0); 
+			System.out.println("obtaining connection factory...");
+			com.sun.messaging.ConnectionFactory connectionFactory = new com.sun.messaging.ConnectionFactory();
+			connectionFactory.setProperty(ConnectionConfiguration.imqAddressList,host+":7676");	
+			connectionFactory.setProperty(ConnectionConfiguration.imqConsumerFlowLimitPrefetch,"false");	
 			
-			// escravo tenta se registrar no mestre a cada 30s
-			Timer t = new Timer();
-			t.schedule(registerTask(objref, slave.getName(), slave.getId()), 0, 30000);
+			System.out.println("obtained connection factory.");
 			
-		}catch(Exception e) {
-			e.printStackTrace();
-		}	
-		
-	}
+			System.out.println("obtaining queue...");
+			Queue queue = new com.sun.messaging.Queue("SubAttacksQueue");
+			System.out.println("obtained queue.");			
 	
+			JMSContext context = connectionFactory.createContext();
+			
+			JMSConsumer consumer = context.createConsumer(queue); 
+
+			while (true)
+			{
+				Message m = consumer.receive();
+				if (m instanceof TextMessage)
+				{
+					System.out.print("\nreceived message: ");
+					System.out.println(((TextMessage)m).getText());
+				}
+				
+				Thread.sleep(1000);
+				System.out.print("\nidle ");
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+	}
+		
 
 
 	@Override
@@ -145,7 +161,7 @@ public class SlaveImpl implements Slave {
 
 	public void readDictionary() {
 		try {
-			Path dictionaryPath =  Paths.get("/tmp/dictionary.txt"); // dicionario deve estar na pasta tmp de cada pc
+			Path dictionaryPath =  Paths.get("dictionary.txt"); // dicionario deve estar na pasta tmp de cada pc
 			dictionary = (ArrayList<String>) Files.readAllLines(dictionaryPath, StandardCharsets.UTF_8);
 		} catch (Exception e) {
 			System.out.println("Erro na leitura do arquivo :(");

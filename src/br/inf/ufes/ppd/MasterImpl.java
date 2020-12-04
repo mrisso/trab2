@@ -18,6 +18,10 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import com.google.gson.Gson;
+import javax.jms.*;
+
+import com.sun.messaging.ConnectionConfiguration;
 
 public class MasterImpl implements Master {
 	private static Master mref;
@@ -30,29 +34,22 @@ public class MasterImpl implements Master {
 	private static List<String> dictionary = new ArrayList<String>();
 	private static int attackNumber = 0;
 	private int active = 0;
+	private int m;
+	private static JMSContext context;
+	private static JMSProducer producer;
+	private static Queue subAttackQueue;
+	private static Queue guessesQueue;
 	
-	public MasterImpl() { 
+	public MasterImpl(int m/*, JMSContext context, JMSProducer producer, Queue subAttackQueue, Queue guessesQueue*/) { 
+		this.m = m;
+		/*
+		MasterImpl.context = context;
+		MasterImpl.producer = producer;
+		MasterImpl.subAttackQueue = subAttackQueue;
+		MasterImpl.guessesQueue = guessesQueue;
+		*/
     }
 	
-
-	@Override
-	public void addSlave(Slave s, String slaveName, UUID slavekey) throws RemoteException {
-		// escravo ja esta registrado
-		if(slavesInfo.containsKey(slavekey)) {
-			System.out.println("Mestre: Atualizei o registro do escravo de nome " + slaveName + "!");
-			SlaveInfo si = slavesInfo.get(slavekey);
-			synchronized(si) {
-				si.setLastCheckIn(System.nanoTime());
-			}
-		// escravo precisa se registrar
-		} else {
-			SlaveInfo si = new SlaveInfo(s, slaveName, slavekey);
-			slavesInfo.put(slavekey, si);
-			System.out.println("Mestre: Registrei o escravo de nome " + si.getName() + "!");	
-		}
-		
-	}
-
 	@Override
 	public void foundGuess(UUID slaveKey, int attackNumber, long currentindex, Guess currentguess)
 			throws RemoteException {
@@ -138,240 +135,51 @@ public class MasterImpl implements Master {
 		return running;
 	}
 	
-
-
 	@Override
-	public Guess[] attack(byte[] ciphertext, byte[] knowntext) throws RemoteException {
-		// le o dicionario para dividir seu conteudo entre os escravos
-		if (!readDictionary()) return null;
+	public Guess[] attack(String ciphertext, String knowntext) throws RemoteException {
+		System.out.println("Tentando ler dicionário");
+		if(!readDictionary())
+			return null;
+		
 		attackNumber++;
-		AttackInfo thisAttack = new AttackInfo(attackNumber);
-		ArrayList<Guess> attackGuesses = new ArrayList<Guess>();
-		guessList.put(thisAttack.getAttackNumber(), attackGuesses);
 		
-		// adiciona 1 ao count de ataques (contribuicao deste ataque)
-		active++;
-		
-		int totalSlaves = slavesInfo.size();
 		int totalWords = dictionary.size();
-		int vectorSize = totalWords/totalSlaves;
-		int remainder = totalWords%totalSlaves;
+		int vectorSize = totalWords/m;
+		int remainder = totalWords%m;
 		int start = 0;
 		int end = vectorSize - 1;
 		
-		for(Entry<UUID, SlaveInfo> si : slavesInfo.entrySet()) {
-			// caso a divisao de trabalho nao seja exata, adiciona +1 no vetor de cada escravo ate que o resto seja 0
+		for(int i = 0; i < m; i++)
+		{
 			if (remainder > 0) {
 				end++;
 				remainder--;
 			}
 			
-			SlaveInfo slaveInfo = si.getValue();
-			slaveInfo.setLastCheckIn(System.nanoTime());
-			UUID subattackId = UUID.randomUUID();
+			SubAttack sub = new SubAttack(ciphertext, knowntext, start, end, attackNumber);
 			
-			// cria o ataque correspondente a este escravo
-			Thread subattack = new SlaveAttack(subattackId, slaveInfo.getSref(), slaveInfo, ciphertext, knowntext, start, end, thisAttack.getAttackNumber(), mref);
-			slaveInfo.getAttacks().add(subattackId);
+			Gson gson = new Gson();
 
-			// atualiza parametros
+			String json = gson.toJson(sub);
+			System.out.println(json);
+			TextMessage message = context.createTextMessage(); 
+			try {
+				message.setText(json);
+			} catch (Exception e) {
+				System.out.println("Não foi possível criar a mensagem.");
+			}
+			producer.send(subAttackQueue,message);
+
 			start = end + 1;
 			end += vectorSize;
-			
-			// inicia a thread de ataque do escravo 
-			subattack.start();
-			subattacks.put(subattackId, subattack);
-			slaveInfo.setActive(+1);
-						
-			// cria e inicia a thread que checa o tempo entre check-ins do escravo
-			Runnable mastercheck = new MasterCheck(slaveInfo, this, subattack);
-			Thread checkThread = new Thread(mastercheck);
-			checkThread.start();
-			checks.put(slaveInfo.getId(), checkThread);
 		}
-		
-		// apos o inicio de todas as threads de subataque, gerenciamos o fim do ataque
-		boolean complete = true;
-		List<UUID> subattacksToRemove = new ArrayList<UUID>();
-		
-		// join das threads de subataque
-		while(true) {
-			for(Entry<UUID, Thread> sa : subattacks.entrySet()) {
-				Thread subattack = sa.getValue();
-				SlaveAttack at = (SlaveAttack) sa.getValue();
-				
-				if(at.getAttackNumber() == thisAttack.getAttackNumber()) {
-					try {
-							subattack.join();
-					} catch(InterruptedException ie) {
-						System.out.println("Ataque do escravo "+ at.getSlaveInfo().getId() +" foi interrompido e nao conseguiu dar join!");
-					}
-					// verifica se a thread finalizada foi completada com sucesso
-					if(at.getLastCheckedIndex() < at.getFinalindex()) {
-						complete = false;
-					}else {
-						subattacksToRemove.add(at.getMyId());
-					}
-				}
-			}
-			// se o ataque acabou mas alguma parte do vetor nao foi percorrida, significa que algum escravo morreu mas o mestre ainda nao viu
-			// ataque espera 20s para dar tempo do mestre perceber e realocar o vetor.
-			if(!complete)
-				try {
-					System.out.println("Algum escravo nao terminou o ataque. Aguardando redirecionamento...");
-					Thread.sleep(22000);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			
-			// Apos os joins, verifica se nesse meio tempo surgiram novas threads neste ataque (escravos que falharam). 
-			//Se sim, ainda ha threads deste ataque precisando de join e a lista eh percorrida novamente
-			if(!thereAreThreadsRunning(thisAttack.getAttackNumber())) {
-				break;
-			}
-		}
-		
-		// apos as threads de ataque terminarem, mestre para de checar o estado dos escravos que estao inativos
-		for(Entry<UUID, Thread> sa : checks.entrySet()) {
-			Thread checkin = sa.getValue();
-			if(slavesInfo.get(sa.getKey()).getActive() == 0) checkin.interrupt();
-		}
-		
-		// armazena as respostas em um vetor de Guess
-		Guess[] finalGuesses;
-		ArrayList<Guess> finalList = guessList.get(thisAttack.getAttackNumber());
-		synchronized(finalList) {
-			finalGuesses = new Guess[finalList.size()];
-			finalGuesses = finalList.toArray(finalGuesses);
-		}
-		
-		// retira a contribuicao deste ataque do count de ataques
-		active--;
-		
-		
-		//remove os ataques finalizados da lista de ataque dos escravos
-		List<UUID> idsToRemove = new ArrayList<UUID>();
-		
-		for(Entry<UUID, SlaveInfo> slaveInfo : slavesInfo.entrySet()) {
-			SlaveInfo s = slaveInfo.getValue();
-			List<UUID> attacksId = s.getAttacks();
-			
-			synchronized(attacksId) {
-				for(UUID id : attacksId) {
-					SlaveAttack sl = (SlaveAttack) subattacks.get(id);
-					if(sl.getAttackNumber() == thisAttack.getAttackNumber())
-						idsToRemove.add(id);
-				}
-				
-				for(UUID id : idsToRemove) {
-					attacksId.remove(id);
-					subattacks.remove(id);
-				}
-			}
-			idsToRemove.clear();
-		}
-		
-		return finalGuesses;
-	}
 
-	public Guess[] serialAttack(byte[] ciphertext, byte[] knowntext) {
-		if (!readDictionary()) return null;
-		byte[] decrypted = null;
-		List<Guess> guessList = new ArrayList<Guess>();
-		
-		for(int i = 0; i < dictionary.size(); i++)
-		{
-			try {
-
-				byte[] key = dictionary.get(i).getBytes();
-				SecretKeySpec keySpec = new SecretKeySpec(key, "Blowfish");
-
-				Cipher cipher = Cipher.getInstance("Blowfish");
-				cipher.init(Cipher.DECRYPT_MODE, keySpec);
-
-				decrypted = cipher.doFinal(ciphertext);
-
-			} catch (javax.crypto.BadPaddingException e) {
-				// essa excecao e jogada quando a senha esta incorreta
-				// porem nao quer dizer que a senha esta correta se nao jogar essa excecao
-				continue;
-
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-
-			// Caso a palavra conhecida seja encontrada
-			if(indexOf(decrypted, knowntext) != -1) {
-				Guess answer = new Guess();
-				answer.setKey(dictionary.get(i));
-				answer.setMessage(decrypted);
-				guessList.add(answer);
-			}
-		}
-		
-		Guess[] guessArray = new Guess[guessList.size()];
-		guessArray = guessList.toArray(guessArray);
-
-		return guessArray;
-	}
-	
-	@Override
-	public void removeSlave(UUID slaveKey) throws RemoteException {
-		try {
-			SlaveInfo si = slavesInfo.get(slaveKey);
-			
-			synchronized(si) {
-				// remove o escravo da lista e redistribui o trabalho
-				repairAttack(slaveKey, si.getAttacks());
-			}
-			
-			System.out.println("Mestre: Removi o escravo de id " + slaveKey + "!");
-		} catch (NullPointerException ne) {
-		}
-		
-	}
-	
-	// funcao chamada quando algum escravo morre. redistribui o trabalho
-	public void repairAttack(UUID slaveKey, List<UUID> attacks) throws RemoteException {
-		System.out.println("Algum escravo morreu! tentando redistribuir o ataque...");
-		slavesInfo.remove(slaveKey);
-		checks.remove(slaveKey);
-		
-		// itera sobre a lista de slavesInfo apenas para pegar o objeto correspondente ao algum escravo. Havera apenas uma iteracao
-		for(Entry<UUID, SlaveInfo> si : slavesInfo.entrySet()) {
-			
-			SlaveInfo substitute = si.getValue();
-			
-			// itera sob cada ataque do escravo que falhou, realocando seus ataques para o substituto
-			synchronized(attacks) {
-				for(UUID id : attacks) {
-					
-					// cria nova thread de ataque para o escravo substituto com os dados do ataque que falhou
-					SlaveAttack failedAttack = (SlaveAttack) subattacks.get(id);
-					
-					if(failedAttack.getLastCheckedIndex() < failedAttack.getFinalindex()) { // ignora os ataques finalizados do escravo
-						UUID newAttackId = UUID.randomUUID();
-						Thread subattack = new SlaveAttack(newAttackId, substitute.getSref(), substitute, failedAttack.getCiphertext(), failedAttack.getKnowntext(), failedAttack.getLastCheckedIndex()+1, failedAttack.getFinalindex(), failedAttack.getAttackNumber(), mref);
-
-						// adiciona novo ataque a lista de ataques do substituto
-						substitute.getAttacks().add(newAttackId);
-						subattack.start();
-						substitute.setActive(+1);
-						
-						// remove ataque falho da lista de ataques e adiciona o novo ataque
-						subattacks.remove(id);
-						subattacks.put(newAttackId, subattack);
-					}
-				}
-			}
-			// apos alocar os ataques falhos a um substituto (o primeiro escravo que o loop encontrar), saimos do for
-			break;
-		}
+		return null;
 	}
 	
 	public boolean readDictionary() {
 		try {
-			Path dictionaryPath =  Paths.get("/tmp/dictionary.txt"); // dicionario deve estar na pasta tmp de cada pc
+			Path dictionaryPath =  Paths.get("dictionary.txt"); // dicionario deve estar na pasta tmp de cada pc
 			dictionary = (ArrayList<String>) Files.readAllLines(dictionaryPath, StandardCharsets.UTF_8);
 		} catch (Exception e) {
 			System.out.println("Erro na leitura do arquivo :(");
@@ -381,90 +189,45 @@ public class MasterImpl implements Master {
 	}
 	
 	public static void main(String[] args) {
-		master = new MasterImpl();
-		String filename = null;
-		String knowntext = null;
-		byte[] byteArrayMessage = null;
-		Guess[] guesses = null;
+		String host = (args.length < 1) ? "127.0.0.1" : args[0];
 
-		// implementacao serial
-		if(args.length > 0)
-		{
-			try {
-				filename = args[0];
-				knowntext = args[1];
-			} catch (Exception e)
-			{
-				System.out.println("Para a execucao serial, especifique o nome do arquivo e a palavra conhecida.");
-				System.exit(2);
-			}
-			
-			// lendo o arquivo
-			File arquivoCriptografado = new File(filename);
+		int m = args.length > 1 ? Integer.parseInt(args[0]) : 4;
+		master = new MasterImpl(m);
 		
-			// caso o arquivo exista, leia
-			if(arquivoCriptografado.exists())
-			{
-				try {
-					byteArrayMessage = Files.readAllBytes(arquivoCriptografado.toPath());
-				} catch (IOException e) { 
-					e.printStackTrace();
-				}
-			}
+		try {
+			System.out.println("obtaining connection factory...");
+			com.sun.messaging.ConnectionFactory connectionFactory = new com.sun.messaging.ConnectionFactory();
+			connectionFactory.setProperty(ConnectionConfiguration.imqAddressList,host+":7676");	
+			System.out.println("obtained connection factory.");
 			
-			else
-			{
-				System.out.println("Arquivo nao existe!");
-				System.exit(3);
-			}
-			
-			long startTime = System.nanoTime();
-			//Ataque Serial
-			guesses = master.serialAttack(byteArrayMessage, knowntext.getBytes());
-			long endTime = System.nanoTime();
+			System.out.println("obtaining sub queue...");
+			subAttackQueue = new com.sun.messaging.Queue("SubAttacksQueue");
+			System.out.println("obtained queue.");
 
-			System.out.println("Tempo de Execucao: " + ((endTime - startTime)/1000000) + "ms");
-			
-			if(guesses == null) {
-				System.out.println("O ataque nao pode ser realizado pois houve um erro na leitura do arquivo :(");
-			}
-			else if(guesses.length > 0) {
-				System.out.println("Chaves em potencial encontradas! salvando mensagens descriptografadas...");
-				
-				// salva cada mensagem em um arquivo de nome igual ao nome da chave
-				FileOutputStream out = null;
-				
-				try {
-					for (int i = 0; i < guesses.length; i++) {
-						System.out.println("Criando arquivo "+guesses[i].getKey()+".msg");
-						out = new FileOutputStream(guesses[i].getKey() + ".msg");
-						out.write(guesses[i].getMessage());
-						out.close();
-					}
-				} catch (Exception e) {
-					System.out.println("Nao foi possivel salvar resultados nos arquivos.");
-				}
+			System.out.println("obtaining guesses queue...");
+			guessesQueue = new com.sun.messaging.Queue("GuessesQueue");
+			System.out.println("obtained queue.");
 
-			}else {
-				System.out.println("Nenhuma chave em potencial encontrada...");
-			}
+			context = connectionFactory.createContext();
+			producer = context.createProducer();
+		} catch (Exception e) {
+			System.out.println("Não foi possível obter as filas.");
+			System.exit(2);
 		}
+
 		// implementacao paralela (com escravos)
-		else
-		{
-			try {
-				mref = (Master) UnicastRemoteObject.exportObject(master, 0);
+		try {
+			mref = (Master) UnicastRemoteObject.exportObject(master, 0);
 			
-				//Registry registry = LocateRegistry.getRegistry();
-				System.setProperty("java.rmi.server.hostname", "10.10.10.8");
-				Registry registry = LocateRegistry.createRegistry(1099);
-				registry.rebind("mestre", mref);
-				System.out.println("Mestre ligado!");
-			} catch (RemoteException e) {
-				System.out.println("O mestre nao conseguiu se iniciar :(");
-				//e.printStackTrace();
-				System.exit(1);
-			}
+			//Registry registry = LocateRegistry.getRegistry();
+			System.setProperty("java.rmi.server.hostname", host);
+			Registry registry = LocateRegistry.createRegistry(1099);
+			registry.rebind("mestre", mref);
+			System.out.println("Mestre ligado!");
+		} catch (RemoteException e) {
+			System.out.println("O mestre nao conseguiu se iniciar :(");
+			//e.printStackTrace();
+			System.exit(1);
 		}
 	}
 
@@ -501,6 +264,35 @@ public class MasterImpl implements Master {
 		this.active = active;
 	}
 
+	public JMSContext getContext() {
+		return context;
+	}
 
-	
+	public void setContext(JMSContext context) {
+		this.context = context;
+	}
+
+	public JMSProducer getProducer() {
+		return producer;
+	}
+
+	public void setProducer(JMSProducer producer) {
+		this.producer = producer;
+	}
+
+	public Queue getSubAttackQueue() {
+		return subAttackQueue;
+	}
+
+	public void setSubAttackQueue(Queue subAttackQueue) {
+		this.subAttackQueue = subAttackQueue;
+	}
+
+	public Queue getGuessesQueue() {
+		return guessesQueue;
+	}
+
+	public void setGuessesQueue(Queue guessesQueue) {
+		this.guessesQueue = guessesQueue;
+	}
 }
