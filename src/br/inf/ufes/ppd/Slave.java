@@ -28,10 +28,9 @@ public interface Slave extends Remote {
 	public void startSubAttack(
 			byte[] ciphertext,
 			byte[] knowntext,
-			long initialwordindex,
-			long finalwordindex,
-			int attackNumber,
-			SlaveManager callbackinterface)
+			int initialwordindex,
+			int finalwordindex,
+			int attackNumber)
 	throws java.rmi.RemoteException;
 
 }

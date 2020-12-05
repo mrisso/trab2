@@ -8,6 +8,10 @@ package br.inf.ufes.ppd;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 
+import javax.jms.JMSException;
+
+import com.google.gson.JsonSyntaxException;
+
 public interface Attacker extends Remote {
 
 	/**
@@ -16,7 +20,9 @@ public interface Attacker extends Remote {
 	 * @param knowntext trecho conhecido da mensagem decriptografada
 	 * @return vetor de chutes: chaves candidatas e mensagem
 	 * decriptografada com chaves candidatas
+	 * @throws JMSException 
+	 * @throws JsonSyntaxException 
 	 */
 	public Guess[] attack(String ciphertext,
-			String knowntext) throws RemoteException ;
+			String knowntext) throws RemoteException, JsonSyntaxException, JMSException ;
 }

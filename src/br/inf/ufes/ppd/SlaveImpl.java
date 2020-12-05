@@ -16,8 +16,10 @@ import java.util.UUID;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 
+import com.google.gson.Gson;
 import com.sun.messaging.*;
 import com.sun.messaging.Queue;
+import com.sun.messaging.ConnectionConfiguration;
 
 import javax.jms.*;
 import java.util.logging.Level;
@@ -29,6 +31,11 @@ public class SlaveImpl implements Slave {
 	private String name;
 	private long currentindex = 0;
 	private ArrayList<String> dictionary;
+	private JMSContext context;
+	private JMSProducer producer;
+	private JMSConsumer consumer;
+	private Queue subAttackQueue;
+	private Queue guessesQueue;
 	
 	
 	public SlaveImpl(UUID id, String name) {
@@ -41,85 +48,45 @@ public class SlaveImpl implements Slave {
 		return this.currentindex;
 	}
 	
-	// tarefa para realizar o checkpoint 
-	public TimerTask checkpointTask(int attackNumber, SlaveManager callbackinterface) {
-		TimerTask tt = new TimerTask() {
-			public void run() {
-				try {
-					callbackinterface.checkpoint(id, attackNumber, currentindex);
-				} catch (Exception e) {
-					System.out.println("Escravo " +name+ ": nao consegui fazer o checkpoint!");
-				}
-				
-			}
-		};
-		return tt;
-	}
-	
-	public static void lookupMaster() throws RemoteException, NotBoundException {
-		//Registry registry = LocateRegistry.getRegistry();
-		Registry registry = LocateRegistry.getRegistry("10.10.10.8");
-		mestre = (Master) registry.lookup("mestre");
-	}
-	
-	public static void main(String[] args) {
+	public void sendGuess(Guess answer) {
+		Gson gson = new Gson();
 
-		UUID id = UUID.randomUUID();
-		// permite que o usuario forneca um nome para o escravo pela linha de comando
-		String name = (args.length > 0) ? args[0] : "Escravo" + id.toString();
-		
-		SlaveImpl slave = new SlaveImpl(id, name);
-
-		String host = (args.length < 1) ? "127.0.0.1" : args[0];
+		String json = gson.toJson(answer);
+		TextMessage message = context.createTextMessage(); 
 		
 		try {
-			Logger.getLogger("").setLevel(Level.INFO);
-			
-			System.out.println("obtaining connection factory...");
-			com.sun.messaging.ConnectionFactory connectionFactory = new com.sun.messaging.ConnectionFactory();
-			connectionFactory.setProperty(ConnectionConfiguration.imqAddressList,host+":7676");	
-			connectionFactory.setProperty(ConnectionConfiguration.imqConsumerFlowLimitPrefetch,"false");	
-			
-			System.out.println("obtained connection factory.");
-			
-			System.out.println("obtaining queue...");
-			Queue queue = new com.sun.messaging.Queue("SubAttacksQueue");
-			System.out.println("obtained queue.");			
-	
-			JMSContext context = connectionFactory.createContext();
-			
-			JMSConsumer consumer = context.createConsumer(queue); 
-
-			while (true)
-			{
-				Message m = consumer.receive();
-				if (m instanceof TextMessage)
-				{
-					System.out.print("\nreceived message: ");
-					System.out.println(((TextMessage)m).getText());
-				}
-				
-				Thread.sleep(1000);
-				System.out.print("\nidle ");
-			}
+			message.setText(json);
 		} catch (Exception e) {
-			e.printStackTrace();
+			System.out.println("Nao foi possivel criar a mensagem.");
 		}
-
+		producer.send(guessesQueue, message);
 	}
+	
+	public void sendFinalCheckpoint(int attackNumber) {
 		
+		Guess answer = new Guess(attackNumber);
+		answer.setKey(null);
+		answer.setKey(null);
+		
+		Gson gson = new Gson();
 
-
+		String json = gson.toJson(answer);
+		TextMessage message = context.createTextMessage(); 
+		
+		try {
+			message.setText(json);
+		} catch (Exception e) {
+			System.out.println("Nao foi possivel criar a mensagem.");
+		}
+		producer.send(guessesQueue, message);
+	}
+	
 	@Override
-	public void startSubAttack(byte[] ciphertext, byte[] knowntext, long initialwordindex, long finalwordindex,
-			int attackNumber, SlaveManager callbackinterface) throws RemoteException {
+	public void startSubAttack(byte[] ciphertext, byte[] knowntext, int initialwordindex, int finalwordindex,
+			int attackNumber) throws RemoteException {
 
 		long i = initialwordindex;
 		currentindex = initialwordindex;
-		
-		// agenda a tarefa de realizar o checkpoint a cada 10s
-		Timer t = new Timer();
-		t.schedule(checkpointTask(attackNumber, callbackinterface), 0, 10000);
 		
 		// Andar pelas palavras do dicionario tentando desencriptar a mensagem
 		for(i = initialwordindex; i <= finalwordindex; i++)
@@ -146,17 +113,71 @@ public class SlaveImpl implements Slave {
 			
 			// Caso a palavra conhecida seja encontrada
 			if(indexOf(decrypted, knowntext) != -1) {
-				Guess answer = new Guess();
+				Guess answer = new Guess(attackNumber);
 				answer.setKey(dictionary.get((int)i));
 				answer.setMessage(decrypted);
-				callbackinterface.foundGuess(this.id, attackNumber, i, answer);
+				
+				sendGuess(answer);
 			}
 			
 		}
 		
-		// realiza o ultimo checkpoint e interrompe a tarefa agendada
-		callbackinterface.checkpoint(this.id, attackNumber, currentindex);
-		t.cancel();
+		sendFinalCheckpoint(attackNumber);
+	}
+	
+	public static void main(String[] args) {
+
+		UUID id = UUID.randomUUID();
+		// permite que o usuario forneca um nome para o escravo pela linha de comando
+		String name = (args.length > 0) ? args[0] : "Escravo" + id.toString();
+		
+		SlaveImpl slave = new SlaveImpl(id, name);
+
+		String host = (args.length < 1) ? "127.0.0.1" : args[0];
+		
+		try {
+			Logger.getLogger("").setLevel(Level.INFO);
+			
+			System.out.println("Obtendo conexao...");
+			com.sun.messaging.ConnectionFactory connectionFactory = new com.sun.messaging.ConnectionFactory();
+			connectionFactory.setProperty(ConnectionConfiguration.imqAddressList,host+":7676");	
+			connectionFactory.setProperty(ConnectionConfiguration.imqConsumerFlowLimitPrefetch,"false");	
+			System.out.println("Conexao obtida.");
+			
+			System.out.println("Obtendo filas...");
+			slave.setGuessesQueue(new com.sun.messaging.Queue("GuessesQueue"));
+			slave.setSubAttackQueue(new com.sun.messaging.Queue("SubAttacksQueue"));
+			System.out.println("Filas obtidas.");	
+	
+			slave.setContext(connectionFactory.createContext());
+			slave.setConsumer(slave.getContext().createConsumer(slave.getSubAttackQueue()));
+			slave.setProducer(slave.getContext().createProducer());
+			
+			Gson gson = new Gson();
+			 
+			while (true)
+			{
+				Message m = slave.getConsumer().receive();
+				if (m instanceof TextMessage)
+				{	
+					System.out.print("\nreceived subattack command.");
+					SubAttack subattack = gson.fromJson(((TextMessage) m).getText(), SubAttack.class);
+					
+					// ta errado
+					System.out.println(subattack.getKnowntext().getBytes());
+					
+					slave.startSubAttack(subattack.getCiphertext().getBytes(), 
+											subattack.getKnowntext().getBytes(), 
+											subattack.getInitialindex(), 
+											subattack.getFinalindex(), 
+											subattack.getAttacknumber());
+				}
+				System.out.print("\nidle ");
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
 	}
 
 	public void readDictionary() {
@@ -196,6 +217,46 @@ public class SlaveImpl implements Slave {
 
 	public void setId(UUID id) {
 		this.id = id;
+	}
+
+	public JMSContext getContext() {
+		return context;
+	}
+
+	public void setContext(JMSContext context) {
+		this.context = context;
+	}
+
+	public JMSProducer getProducer() {
+		return producer;
+	}
+
+	public void setProducer(JMSProducer producer) {
+		this.producer = producer;
+	}
+
+	public Queue getSubAttackQueue() {
+		return subAttackQueue;
+	}
+
+	public void setSubAttackQueue(Queue subAttackQueue) {
+		this.subAttackQueue = subAttackQueue;
+	}
+
+	public Queue getGuessesQueue() {
+		return guessesQueue;
+	}
+
+	public void setGuessesQueue(Queue guessesQueue) {
+		this.guessesQueue = guessesQueue;
+	}
+
+	public JMSConsumer getConsumer() {
+		return consumer;
+	}
+
+	public void setConsumer(JMSConsumer consumer) {
+		this.consumer = consumer;
 	}
 	
 }

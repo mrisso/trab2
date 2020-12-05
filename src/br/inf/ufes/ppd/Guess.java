@@ -15,6 +15,12 @@ public class Guess implements Serializable {
 
 	private byte[] message;
 	// mensagem decriptografada com a chave candidata
+	
+	private int attackNumber;
+	
+	public Guess(int attackNumber) {
+		this.attackNumber = attackNumber;
+	}
 
 	public String getKey() {
 		return key;
@@ -27,6 +33,10 @@ public class Guess implements Serializable {
 	}
 	public void setMessage(byte[] message) {
 		this.message = message;
+	}
+
+	public int getAttackNumber() {
+		return attackNumber;
 	}
 
 }

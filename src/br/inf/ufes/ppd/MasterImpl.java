@@ -19,6 +19,8 @@ import java.util.Map.Entry;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+
 import javax.jms.*;
 
 import com.sun.messaging.ConnectionConfiguration;
@@ -35,119 +37,36 @@ public class MasterImpl implements Master {
 	private static int attackNumber = 0;
 	private int active = 0;
 	private int m;
+	private static long timeLimit = 300000;
 	private static JMSContext context;
 	private static JMSProducer producer;
+	private static JMSConsumer consumer;
 	private static Queue subAttackQueue;
 	private static Queue guessesQueue;
 	
-	public MasterImpl(int m/*, JMSContext context, JMSProducer producer, Queue subAttackQueue, Queue guessesQueue*/) { 
+	public MasterImpl(int m) { 
 		this.m = m;
-		/*
-		MasterImpl.context = context;
-		MasterImpl.producer = producer;
-		MasterImpl.subAttackQueue = subAttackQueue;
-		MasterImpl.guessesQueue = guessesQueue;
-		*/
     }
 	
 	@Override
-	public void foundGuess(UUID slaveKey, int attackNumber, long currentindex, Guess currentguess)
-			throws RemoteException {
-		int localindex = (int) currentindex;
-		System.out.println("FOUNDGUESS: slaveKey -> " + slaveKey + " attackNumber -> " + attackNumber + " currentIndex -> " + localindex + " key -> " + currentguess.getKey());
-		SlaveInfo si = slavesInfo.get(slaveKey);
-		synchronized(si) {
-			si.setLastCheckIn(System.nanoTime());
-			
-			List<UUID> attacksId = si.getAttacks();
-			
-			// percorre a lista de ataques do escravo ate encontrar o ataque na qual esse checkpoint pertence, 
-			// e atualiza seu ultimo indice checado
-			synchronized(attacksId) {
-				for(UUID id : attacksId) {
-					SlaveAttack sub = (SlaveAttack) subattacks.get(id);
-					
-					synchronized(sub) {
-						if(localindex >= sub.getInitialindex() && localindex <= sub.getFinalindex() && sub.getAttackNumber() == attackNumber && localindex >= sub.getLastCheckedIndex()) {
-							// indice do checkpoint pertence a este subataque
-							sub.setLastCheckedIndex( localindex); 
-							break;
-						}
-					}
-				}
-			}
-		}
-		synchronized(guessList.get(attackNumber)) {
-			guessList.get(attackNumber).add(currentguess);
-		}
-		
-	}
-
-	@Override
-	public void checkpoint(UUID slaveKey, int attackNumber, long currentindex) throws RemoteException {
-		SlaveInfo si = slavesInfo.get(slaveKey);
-
-		int localindex = (int) currentindex;
-		synchronized(si) {
-			si.setLastCheckIn(System.nanoTime());
-			
-			List<UUID> attacksId = si.getAttacks();
-			
-			// percorre a lista de ataques do escravo ate encontrar o ataque na qual esse checkpoint pertence, 
-			// e atualiza seu ultimo indice checado
-			
-			synchronized(attacksId) {
-				for(UUID id : attacksId) {
-					SlaveAttack sub = (SlaveAttack) subattacks.get(id);
-					synchronized(sub) {
-						if(localindex >= sub.getInitialindex() && localindex <= sub.getFinalindex() && sub.getAttackNumber() == attackNumber && localindex >= sub.getLastCheckedIndex()) {
-							// indice do checkpoint pertence a este subataque
-							sub.setLastCheckedIndex( localindex); 
-							if(sub.getFinalindex() == localindex) {
-								System.out.println("CHECKPOINT: slaveKey -> " + slaveKey + " attackNumber -> " + sub.getAttackNumber() + " currentIndex -> " + localindex +" [LAST]");
-								synchronized(si) {
-									si.setActive(-1);
-								}
-							} else {
-								System.out.println("CHECKPOINT: slaveKey -> " + slaveKey + " attackNumber -> " + sub.getAttackNumber() + " currentIndex -> " + localindex);
-							}
-							break;
-						}
-					}
-				}
-			}
-		}
-	}
-	
-	// verifica se ha alguma thread de ataque viva
-	public boolean thereAreThreadsRunning(int attackNumber) {
-		
-		boolean running = false;
-		
-		for(Entry<UUID, Thread> sa : subattacks.entrySet()) {
-			SlaveAttack slaveattack = (SlaveAttack) sa.getValue();
-			// true caso alguma thread deste ataque esteja viva
-			if (slaveattack.getAttackNumber() == attackNumber && sa.getValue().isAlive()) {
-				running = true;
-				break;
-			}
-		}
-		return running;
-	}
-	
-	@Override
-	public Guess[] attack(String ciphertext, String knowntext) throws RemoteException {
-		System.out.println("Tentando ler dicionário");
+	public Guess[] attack(String ciphertext, String knowntext) throws RemoteException, JsonSyntaxException, JMSException {
 		if(!readDictionary())
 			return null;
 		
-		attackNumber++;
+		int count = 0;
+		long timePassed = 0;
+		long beginTime = 0;
+		
+		int localAttackNumber = attackNumber++;
 		
 		int totalWords = dictionary.size();
 		int vectorSize = totalWords/m;
 		int remainder = totalWords%m;
 		int start = 0;
 		int end = vectorSize - 1;
+		
+		Gson gson = new Gson();
+		ArrayList<Guess> guessesList = new ArrayList<Guess>();
 		
 		for(int i = 0; i < m; i++)
 		{
@@ -156,27 +75,51 @@ public class MasterImpl implements Master {
 				remainder--;
 			}
 			
-			SubAttack sub = new SubAttack(ciphertext, knowntext, start, end, attackNumber);
-			
-			Gson gson = new Gson();
+			SubAttack sub = new SubAttack(ciphertext, knowntext, start, end, localAttackNumber);
 
 			String json = gson.toJson(sub);
-			System.out.println(json);
 			TextMessage message = context.createTextMessage(); 
 			try {
 				message.setText(json);
 			} catch (Exception e) {
-				System.out.println("Não foi possível criar a mensagem.");
+				System.out.println("Nao foi possivel criar a mensagem.");
 			}
 			producer.send(subAttackQueue,message);
 
 			start = end + 1;
 			end += vectorSize;
 		}
+		
+		// recebe as respostas e os checkpoints finais do ataque
+		beginTime = System.currentTimeMillis();
+		timePassed = 0;
+		while (count < m && timePassed < timeLimit)
+		{
+			Message m = consumer.receive(timeLimit);
+			if (m instanceof TextMessage)
+			{	
+				Guess returnedMessage = gson.fromJson(((TextMessage) m).getText(), Guess.class);
+				
+				// mensagem eh uma guess
+				if(returnedMessage.getKey() != null) {
+					guessesList.add(returnedMessage);
+				}
+				// mensagem eh um checkpoint final
+				else {
+					count++;
+				}
+			}
+			timePassed = (System.currentTimeMillis() - beginTime);
+		}
 
-		return null;
+		// retorna a lista de Guesses encontradas
+		Guess[] finalGuesses;
+		finalGuesses = new Guess[guessesList.size()];
+		finalGuesses = guessesList.toArray(finalGuesses);
+
+		return finalGuesses;
 	}
-	
+
 	public boolean readDictionary() {
 		try {
 			Path dictionaryPath =  Paths.get("dictionary.txt"); // dicionario deve estar na pasta tmp de cada pc
@@ -195,55 +138,39 @@ public class MasterImpl implements Master {
 		master = new MasterImpl(m);
 		
 		try {
-			System.out.println("obtaining connection factory...");
+			System.out.println("Obtendo conexao...");
 			com.sun.messaging.ConnectionFactory connectionFactory = new com.sun.messaging.ConnectionFactory();
 			connectionFactory.setProperty(ConnectionConfiguration.imqAddressList,host+":7676");	
-			System.out.println("obtained connection factory.");
+			System.out.println("Conexao obtida.");
 			
-			System.out.println("obtaining sub queue...");
+			System.out.println("Obtendo filas...");
 			subAttackQueue = new com.sun.messaging.Queue("SubAttacksQueue");
-			System.out.println("obtained queue.");
-
-			System.out.println("obtaining guesses queue...");
 			guessesQueue = new com.sun.messaging.Queue("GuessesQueue");
-			System.out.println("obtained queue.");
+			System.out.println("Filas obtidas.");
 
 			context = connectionFactory.createContext();
 			producer = context.createProducer();
+			consumer = context.createConsumer(guessesQueue);
+			
 		} catch (Exception e) {
-			System.out.println("Não foi possível obter as filas.");
+			System.out.println("Nao foi possivel configurar as filas.");
 			System.exit(2);
 		}
 
-		// implementacao paralela (com escravos)
 		try {
 			mref = (Master) UnicastRemoteObject.exportObject(master, 0);
 			
+			System.out.println("Se iniciando no rmi...");
 			//Registry registry = LocateRegistry.getRegistry();
 			System.setProperty("java.rmi.server.hostname", host);
 			Registry registry = LocateRegistry.createRegistry(1099);
 			registry.rebind("mestre", mref);
-			System.out.println("Mestre ligado!");
+			System.out.println("Mestre iniciado.");
 		} catch (RemoteException e) {
-			System.out.println("O mestre nao conseguiu se iniciar :(");
-			//e.printStackTrace();
+			System.out.println("O mestre nao conseguiu se iniciar no rmi.");
 			System.exit(1);
 		}
-	}
-
-	public int indexOf(byte[] outerArray, byte[] smallerArray) {
-	    for(int i = 0; i < outerArray.length - smallerArray.length+1; ++i) {
-	        boolean found = true;
-	        for(int j = 0; j < smallerArray.length; ++j) {
-	           if (outerArray[i+j] != smallerArray[j]) {
-	               found = false;
-	               break;
-	           }
-	        }
-	        if (found) return i;
-	     }
-	   return -1;  
-	}  
+	} 
 
 	public static int getAttackNumber() {
 		return attackNumber;

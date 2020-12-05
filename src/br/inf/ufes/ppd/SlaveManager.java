@@ -17,9 +17,9 @@ public interface SlaveManager extends Remote {
      * decriptografada com a chave candidata
      * @throws java.rmi.RemoteException
      */
-    public void foundGuess(java.util.UUID slaveKey, int attackNumber, long currentindex,
-            Guess currentguess)
-            throws java.rmi.RemoteException;
+//    public void foundGuess(java.util.UUID slaveKey, int attackNumber, long currentindex,
+//            Guess currentguess)
+//            throws java.rmi.RemoteException;
 
     /**
      * Chamado por cada escravo a cada 10s durante ataque para indicar progresso
@@ -30,6 +30,6 @@ public interface SlaveManager extends Remote {
      * @param currentindex índice da chave já verificada
      * @throws java.rmi.RemoteException
      */
-    public void checkpoint(java.util.UUID slaveKey, int attackNumber, long currentindex)
-            throws java.rmi.RemoteException;
+ //   public void checkpoint(java.util.UUID slaveKey, int attackNumber, long currentindex)
+ //           throws java.rmi.RemoteException;
 }
