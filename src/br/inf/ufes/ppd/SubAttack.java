@@ -1,13 +1,15 @@
 package br.inf.ufes.ppd;
+import java.io.Serializable;
 
-public class SubAttack {
-	private String ciphertext;
-	private String knowntext;
+public class SubAttack implements Serializable{
+	private static final long serialVersionUID = 1L;
+	private byte[] ciphertext;
+	private byte[] knowntext;
 	private int initialindex;
 	private int finalindex;	
 	private int attacknumber;
 	
-	public SubAttack(String ciphertext, String knowntext, int initialindex, int finalindex, int attacknumber)
+	public SubAttack(byte[] ciphertext, byte[] knowntext, int initialindex, int finalindex, int attacknumber)
 	{
 		this.ciphertext = ciphertext;
 		this.knowntext = knowntext;
@@ -16,11 +18,11 @@ public class SubAttack {
 		this.attacknumber = attacknumber;
 	}
 
-	public String getCiphertext() {
+	public byte[] getCiphertext() {
 		return ciphertext;
 	}
 
-	public String getKnowntext() {
+	public byte[] getKnowntext() {
 		return knowntext;
 	}
 

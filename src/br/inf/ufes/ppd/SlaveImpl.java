@@ -158,16 +158,16 @@ public class SlaveImpl implements Slave {
 			while (true)
 			{
 				Message m = slave.getConsumer().receive();
-				if (m instanceof TextMessage)
+				if (m instanceof ObjectMessage)
 				{	
-					System.out.print("\nreceived subattack command.");
-					SubAttack subattack = gson.fromJson(((TextMessage) m).getText(), SubAttack.class);
+					System.out.println("\nreceived subattack command.");
+					SubAttack subattack = (SubAttack) ((ObjectMessage) m).getObject();
 					
 					// ta errado
-					System.out.println(subattack.getKnowntext().getBytes());
+					System.out.println(subattack.getKnowntext());
 					
-					slave.startSubAttack(subattack.getCiphertext().getBytes(), 
-											subattack.getKnowntext().getBytes(), 
+					slave.startSubAttack(subattack.getCiphertext(), 
+											subattack.getKnowntext(), 
 											subattack.getInitialindex(), 
 											subattack.getFinalindex(), 
 											subattack.getAttacknumber());

@@ -144,11 +144,8 @@ public class Client {
 			
 			System.out.println("Cliente: Achei o mestre!");
 			
-			// Transformando bytes em String
-			String vetorCriptografadoString = new String(vetorCriptografado, StandardCharsets.UTF_8);
-			
 			//startTime = System.nanoTime();
-			Guess[] respostas = mestre.attack(vetorCriptografadoString, knowntext);
+			Guess[] respostas = mestre.attack(vetorCriptografado, knowntext.getBytes());
 			//endTime = System.nanoTime();
 			
 			//System.out.println("Tempo de Execucao: " + ((endTime - startTime)/1000000) + "ms");

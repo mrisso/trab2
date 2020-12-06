@@ -23,6 +23,6 @@ public interface Attacker extends Remote {
 	 * @throws JMSException 
 	 * @throws JsonSyntaxException 
 	 */
-	public Guess[] attack(String ciphertext,
-			String knowntext) throws RemoteException, JsonSyntaxException, JMSException ;
+	public Guess[] attack(byte[] ciphertext,
+			byte[] knowntext) throws RemoteException, JsonSyntaxException, JMSException ;
 }

@@ -49,7 +49,7 @@ public class MasterImpl implements Master {
     }
 	
 	@Override
-	public Guess[] attack(String ciphertext, String knowntext) throws RemoteException, JsonSyntaxException, JMSException {
+	public Guess[] attack(byte[] ciphertext, byte[] knowntext) throws RemoteException, JsonSyntaxException, JMSException {
 		if(!readDictionary())
 			return null;
 		
@@ -76,15 +76,11 @@ public class MasterImpl implements Master {
 			}
 			
 			SubAttack sub = new SubAttack(ciphertext, knowntext, start, end, localAttackNumber);
+			
+			ObjectMessage objectMessage = context.createObjectMessage();
+			objectMessage.setObject(sub);
 
-			String json = gson.toJson(sub);
-			TextMessage message = context.createTextMessage(); 
-			try {
-				message.setText(json);
-			} catch (Exception e) {
-				System.out.println("Nao foi possivel criar a mensagem.");
-			}
-			producer.send(subAttackQueue,message);
+			producer.send(subAttackQueue, objectMessage);
 
 			start = end + 1;
 			end += vectorSize;
