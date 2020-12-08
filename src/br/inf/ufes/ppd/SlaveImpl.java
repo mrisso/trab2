@@ -48,7 +48,7 @@ public class SlaveImpl implements Slave {
 		return this.currentindex;
 	}
 	
-	public void sendGuess(Guess answer) {
+	public void sendGuess(Guess answer, int attackNumber) {
 		Gson gson = new Gson();
 
 		String json = gson.toJson(answer);
@@ -56,6 +56,7 @@ public class SlaveImpl implements Slave {
 		
 		try {
 			message.setText(json);
+			message.setIntProperty("attackNumber", attackNumber);
 		} catch (Exception e) {
 			System.out.println("Nao foi possivel criar a mensagem.");
 		}
@@ -75,6 +76,7 @@ public class SlaveImpl implements Slave {
 		
 		try {
 			message.setText(json);
+			message.setIntProperty("attackNumber", attackNumber);
 		} catch (Exception e) {
 			System.out.println("Nao foi possivel criar a mensagem.");
 		}
@@ -87,10 +89,12 @@ public class SlaveImpl implements Slave {
 
 		long i = initialwordindex;
 		currentindex = initialwordindex;
+		int teste = 0;
 		
 		// Andar pelas palavras do dicionario tentando desencriptar a mensagem
 		for(i = initialwordindex; i <= finalwordindex; i++)
 		{
+			teste = (int) i;
 			currentindex = i;
 			byte[] decrypted = null;
 			try {
@@ -117,11 +121,11 @@ public class SlaveImpl implements Slave {
 				answer.setKey(dictionary.get((int)i));
 				answer.setMessage(decrypted);
 				
-				sendGuess(answer);
+				sendGuess(answer, attackNumber);
 			}
 			
 		}
-		
+		System.out.println("ao final do ataque "+attackNumber+": "+teste);
 		sendFinalCheckpoint(attackNumber);
 	}
 	
@@ -160,11 +164,7 @@ public class SlaveImpl implements Slave {
 				Message m = slave.getConsumer().receive();
 				if (m instanceof ObjectMessage)
 				{	
-					System.out.println("\nreceived subattack command.");
 					SubAttack subattack = (SubAttack) ((ObjectMessage) m).getObject();
-					
-					// ta errado
-					System.out.println(subattack.getKnowntext());
 					
 					slave.startSubAttack(subattack.getCiphertext(), 
 											subattack.getKnowntext(), 
@@ -172,7 +172,6 @@ public class SlaveImpl implements Slave {
 											subattack.getFinalindex(), 
 											subattack.getAttacknumber());
 				}
-				System.out.print("\nidle ");
 			}
 		} catch (Exception e) {
 			e.printStackTrace();

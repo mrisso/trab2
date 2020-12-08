@@ -3,3 +3,5 @@ bin/*
 naoExisteMais/*
 *.crp
 *.msg
+/bin/
+.classpath

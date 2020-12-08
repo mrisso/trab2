@@ -34,13 +34,11 @@ public class MasterImpl implements Master {
 	protected List<UUID> failedAttacks = new ArrayList<UUID>();
 	protected ConcurrentHashMap<Integer, ArrayList<Guess>> guessList = new ConcurrentHashMap<Integer, ArrayList<Guess>>();
 	private static List<String> dictionary = new ArrayList<String>();
-	private static int attackNumber = 0;
+	private static int atN = 0;
 	private int active = 0;
 	private int m;
-	private static long timeLimit = 300000;
-	private static JMSContext context;
-	private static JMSProducer producer;
-	private static JMSConsumer consumer;
+	private static long timeLimit = 20000;
+	private static com.sun.messaging.ConnectionFactory connectionFactory;
 	private static Queue subAttackQueue;
 	private static Queue guessesQueue;
 	
@@ -57,7 +55,7 @@ public class MasterImpl implements Master {
 		long timePassed = 0;
 		long beginTime = 0;
 		
-		int localAttackNumber = attackNumber++;
+		int localAttackNumber = atN++;
 		
 		int totalWords = dictionary.size();
 		int vectorSize = totalWords/m;
@@ -67,6 +65,11 @@ public class MasterImpl implements Master {
 		
 		Gson gson = new Gson();
 		ArrayList<Guess> guessesList = new ArrayList<Guess>();
+		
+		JMSContext context = connectionFactory.createContext();
+		JMSProducer producer = context.createProducer();
+		JMSConsumer consumer = context.createConsumer(guessesQueue, "attackNumber = " + localAttackNumber);
+		
 		
 		for(int i = 0; i < m; i++)
 		{
@@ -106,6 +109,7 @@ public class MasterImpl implements Master {
 				}
 			}
 			timePassed = (System.currentTimeMillis() - beginTime);
+			System.out.println("ataque "+localAttackNumber+", time passed: "+timePassed);
 		}
 
 		// retorna a lista de Guesses encontradas
@@ -135,7 +139,7 @@ public class MasterImpl implements Master {
 		
 		try {
 			System.out.println("Obtendo conexao...");
-			com.sun.messaging.ConnectionFactory connectionFactory = new com.sun.messaging.ConnectionFactory();
+			connectionFactory = new com.sun.messaging.ConnectionFactory();
 			connectionFactory.setProperty(ConnectionConfiguration.imqAddressList,host+":7676");	
 			System.out.println("Conexao obtida.");
 			
@@ -143,10 +147,6 @@ public class MasterImpl implements Master {
 			subAttackQueue = new com.sun.messaging.Queue("SubAttacksQueue");
 			guessesQueue = new com.sun.messaging.Queue("GuessesQueue");
 			System.out.println("Filas obtidas.");
-
-			context = connectionFactory.createContext();
-			producer = context.createProducer();
-			consumer = context.createConsumer(guessesQueue);
 			
 		} catch (Exception e) {
 			System.out.println("Nao foi possivel configurar as filas.");
@@ -169,12 +169,12 @@ public class MasterImpl implements Master {
 	} 
 
 	public static int getAttackNumber() {
-		return attackNumber;
+		return atN;
 	}
 
 
 	public static void setAttackNumber(int attackNumber) {
-		MasterImpl.attackNumber = attackNumber;
+		MasterImpl.atN = attackNumber;
 	}
 
 
@@ -185,22 +185,6 @@ public class MasterImpl implements Master {
 
 	public void setActive(int active) {
 		this.active = active;
-	}
-
-	public JMSContext getContext() {
-		return context;
-	}
-
-	public void setContext(JMSContext context) {
-		this.context = context;
-	}
-
-	public JMSProducer getProducer() {
-		return producer;
-	}
-
-	public void setProducer(JMSProducer producer) {
-		this.producer = producer;
 	}
 
 	public Queue getSubAttackQueue() {
