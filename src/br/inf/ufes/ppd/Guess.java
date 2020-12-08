@@ -10,6 +10,8 @@ package br.inf.ufes.ppd;
 import java.io.Serializable;
 
 public class Guess implements Serializable {
+	private static final long serialVersionUID = 1L;
+
 	private String key;
 	// chave candidata
 

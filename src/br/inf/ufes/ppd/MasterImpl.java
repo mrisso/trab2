@@ -43,6 +43,7 @@ public class MasterImpl implements Master {
 	private static JMSConsumer consumer;
 	private static Queue subAttackQueue;
 	private static Queue guessesQueue;
+	private static com.sun.messaging.ConnectionFactory connectionFactory;
 	
 	public MasterImpl(int m) { 
 		this.m = m;
@@ -67,6 +68,10 @@ public class MasterImpl implements Master {
 		
 		Gson gson = new Gson();
 		ArrayList<Guess> guessesList = new ArrayList<Guess>();
+
+		JMSContext localContext = connectionFactory.createContext();
+		JMSProducer localProducer = localContext.createProducer();
+		JMSConsumer localConsumer = localContext.createConsumer(guessesQueue, "attackNumber = " + localAttackNumber);
 		
 		for(int i = 0; i < m; i++)
 		{
@@ -79,8 +84,9 @@ public class MasterImpl implements Master {
 			
 			ObjectMessage objectMessage = context.createObjectMessage();
 			objectMessage.setObject(sub);
+			objectMessage.setIntProperty("attackNumber", localAttackNumber);
 
-			producer.send(subAttackQueue, objectMessage);
+			localProducer.send(subAttackQueue, objectMessage);
 
 			start = end + 1;
 			end += vectorSize;
@@ -91,7 +97,7 @@ public class MasterImpl implements Master {
 		timePassed = 0;
 		while (count < m && timePassed < timeLimit)
 		{
-			Message m = consumer.receive(timeLimit);
+			Message m = localConsumer.receive(timeLimit);
 			if (m instanceof TextMessage)
 			{	
 				Guess returnedMessage = gson.fromJson(((TextMessage) m).getText(), Guess.class);
@@ -135,7 +141,7 @@ public class MasterImpl implements Master {
 		
 		try {
 			System.out.println("Obtendo conexao...");
-			com.sun.messaging.ConnectionFactory connectionFactory = new com.sun.messaging.ConnectionFactory();
+			connectionFactory = new com.sun.messaging.ConnectionFactory();
 			connectionFactory.setProperty(ConnectionConfiguration.imqAddressList,host+":7676");	
 			System.out.println("Conexao obtida.");
 			
@@ -144,9 +150,6 @@ public class MasterImpl implements Master {
 			guessesQueue = new com.sun.messaging.Queue("GuessesQueue");
 			System.out.println("Filas obtidas.");
 
-			context = connectionFactory.createContext();
-			producer = context.createProducer();
-			consumer = context.createConsumer(guessesQueue);
 			
 		} catch (Exception e) {
 			System.out.println("Nao foi possivel configurar as filas.");
