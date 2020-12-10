@@ -3,21 +3,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
-import java.rmi.registry.LocateRegistry;
-import java.rmi.registry.Registry;
-import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.UUID;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.google.gson.Gson;
-import com.sun.messaging.*;
 import com.sun.messaging.Queue;
 import com.sun.messaging.ConnectionConfiguration;
 
@@ -26,10 +18,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class SlaveImpl implements Slave {
-	static Master mestre;
-	private UUID id;
-	private String name;
-	private long currentindex = 0;
 	private ArrayList<String> dictionary;
 	private JMSContext context;
 	private JMSProducer producer;
@@ -38,16 +26,10 @@ public class SlaveImpl implements Slave {
 	private Queue guessesQueue;
 	
 	
-	public SlaveImpl(UUID id, String name) {
-		this.id = id;
-        this.name = name;
+	public SlaveImpl() {
         readDictionary();
     }
-	
-	public long getCurrentIndex() {
-		return this.currentindex;
-	}
-	
+
 	public void sendGuess(Guess answer, int attackNumber) {
 		Gson gson = new Gson();
 
@@ -88,14 +70,10 @@ public class SlaveImpl implements Slave {
 			int attackNumber) throws RemoteException {
 
 		long i = initialwordindex;
-		currentindex = initialwordindex;
-		int teste = 0;
 		
 		// Andar pelas palavras do dicionario tentando desencriptar a mensagem
 		for(i = initialwordindex; i <= finalwordindex; i++)
 		{
-			teste = (int) i;
-			currentindex = i;
 			byte[] decrypted = null;
 			try {
 				byte[] key = dictionary.get((int)i).getBytes();
@@ -125,17 +103,13 @@ public class SlaveImpl implements Slave {
 			}
 			
 		}
-		System.out.println("ao final do ataque "+attackNumber+": "+teste);
+		System.out.println("<Escravo> Ataque "+attackNumber+": Subataque finalizado.");
 		sendFinalCheckpoint(attackNumber);
 	}
 	
 	public static void main(String[] args) {
-
-		UUID id = UUID.randomUUID();
-		// permite que o usuario forneca um nome para o escravo pela linha de comando
-		String name = (args.length > 0) ? args[0] : "Escravo" + id.toString();
 		
-		SlaveImpl slave = new SlaveImpl(id, name);
+		SlaveImpl slave = new SlaveImpl();
 
 		String host = (args.length < 1) ? "127.0.0.1" : args[0];
 		
@@ -157,8 +131,6 @@ public class SlaveImpl implements Slave {
 			slave.setConsumer(slave.getContext().createConsumer(slave.getSubAttackQueue()));
 			slave.setProducer(slave.getContext().createProducer());
 			
-			Gson gson = new Gson();
-			 
 			while (true)
 			{
 				Message m = slave.getConsumer().receive();
@@ -166,6 +138,7 @@ public class SlaveImpl implements Slave {
 				{	
 					SubAttack subattack = (SubAttack) ((ObjectMessage) m).getObject();
 					
+					System.out.println("<Escravo> Ataque "+subattack.getAttacknumber()+": Comando de subataque recebido.");
 					slave.startSubAttack(subattack.getCiphertext(), 
 											subattack.getKnowntext(), 
 											subattack.getInitialindex(), 
@@ -201,22 +174,6 @@ public class SlaveImpl implements Slave {
 	     }
 	   return -1;  
 	}  
-
-	public String getName() {
-		return name;
-	}
-
-	public void setName(String name) {
-		this.name = name;
-	}
-
-	public UUID getId() {
-		return id;
-	}
-
-	public void setId(UUID id) {
-		this.id = id;
-	}
 
 	public JMSContext getContext() {
 		return context;

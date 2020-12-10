@@ -1,10 +1,5 @@
 package br.inf.ufes.ppd;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,30 +10,22 @@ import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map.Entry;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
 
 import javax.jms.*;
 
 import com.sun.messaging.ConnectionConfiguration;
+import  com.sun.messaging.ConnectionFactory;
 
 public class MasterImpl implements Master {
 	private static Master mref;
 	private static MasterImpl master;
-	protected ConcurrentHashMap<UUID, SlaveInfo> slavesInfo = new ConcurrentHashMap<UUID, SlaveInfo>();
-	protected ConcurrentHashMap<UUID, Thread> subattacks = new ConcurrentHashMap<UUID, Thread>();
-	protected ConcurrentHashMap<UUID, Thread> checks = new ConcurrentHashMap<UUID, Thread>();
-	protected List<UUID> failedAttacks = new ArrayList<UUID>();
-	protected ConcurrentHashMap<Integer, ArrayList<Guess>> guessList = new ConcurrentHashMap<Integer, ArrayList<Guess>>();
 	private static List<String> dictionary = new ArrayList<String>();
 	private static int atN = 0;
-	private int active = 0;
 	private int m;
 	private static long timeLimit = 20000;
-	private static com.sun.messaging.ConnectionFactory connectionFactory;
+	private static ConnectionFactory connectionFactory;
 	private static Queue subAttackQueue;
 	private static Queue guessesQueue;
 	private static boolean successfulRead = false;
@@ -96,18 +83,20 @@ public class MasterImpl implements Master {
 		timePassed = 0;
 		while (count < m && timePassed < timeLimit)
 		{
-			Message m = consumer.receive(timeLimit);
-			if (m instanceof TextMessage)
+			Message ms = consumer.receive(timeLimit);
+			if (ms instanceof TextMessage)
 			{	
-				Guess returnedMessage = gson.fromJson(((TextMessage) m).getText(), Guess.class);
+				Guess returnedMessage = gson.fromJson(((TextMessage) ms).getText(), Guess.class);
 				
 				// mensagem eh uma guess
 				if(returnedMessage.getKey() != null) {
 					guessesList.add(returnedMessage);
+					System.out.println("<Mestre> Ataque "+localAttackNumber+": chave encontrada! key = "+returnedMessage.getKey());
 				}
 				// mensagem eh um checkpoint final
 				else {
 					count++;
+					System.out.println("<Mestre> Ataque "+localAttackNumber+": "+count+"/"+m+" completo");
 				}
 			}
 			timePassed = (System.currentTimeMillis() - beginTime);
@@ -137,7 +126,7 @@ public class MasterImpl implements Master {
 	public static void main(String[] args) {
 		String host = (args.length < 1) ? "127.0.0.1" : args[0];
 
-		int m = args.length > 1 ? Integer.parseInt(args[0]) : 4;
+		int m = args.length > 1 ? Integer.parseInt(args[1]) : 4;
 		master = new MasterImpl(m);
 		
 		try {
@@ -171,38 +160,5 @@ public class MasterImpl implements Master {
 		}
 	} 
 
-	public static int getAttackNumber() {
-		return atN;
-	}
 
-
-	public static void setAttackNumber(int attackNumber) {
-		MasterImpl.atN = attackNumber;
-	}
-
-
-	public int getActive() {
-		return active;
-	}
-
-
-	public void setActive(int active) {
-		this.active = active;
-	}
-
-	public Queue getSubAttackQueue() {
-		return subAttackQueue;
-	}
-
-	public void setSubAttackQueue(Queue subAttackQueue) {
-		this.subAttackQueue = subAttackQueue;
-	}
-
-	public Queue getGuessesQueue() {
-		return guessesQueue;
-	}
-
-	public void setGuessesQueue(Queue guessesQueue) {
-		this.guessesQueue = guessesQueue;
-	}
 }

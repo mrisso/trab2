@@ -1,23 +1,17 @@
 package br.inf.ufes.ppd;
 
-import java.io.BufferedWriter;
 import java.io.File;
 import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
 
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
-import java.rmi.server.UnicastRemoteObject;
 import java.util.Random;
 import java.util.Scanner;
-import java.io.Serializable;
 
 
 public class Client {
@@ -67,7 +61,6 @@ public class Client {
 		String knowntext = null;
 		byte[] vetorCriptografado = null;
 		byte[] byteArrayMessage = null;
-		byte[] myknowntext = null;
 		long startTime = 0;
 		long endTime = 0;
 		
@@ -134,12 +127,10 @@ public class Client {
 			}
 		}
 		
-		myknowntext = knowntext.getBytes();
-
 		//registrando e pedindo o ataque
 		try {
-			Registry registry = LocateRegistry.getRegistry();
-			//Registry registry = LocateRegistry.getRegistry("10.10.10.8");
+			//Registry registry = LocateRegistry.getRegistry();
+			Registry registry = LocateRegistry.getRegistry("10.10.10.8");
 			Master mestre = (Master) registry.lookup("mestre");
 			
 			System.out.println("Cliente: Achei o mestre!");
