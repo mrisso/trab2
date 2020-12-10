@@ -41,14 +41,16 @@ public class MasterImpl implements Master {
 	private static com.sun.messaging.ConnectionFactory connectionFactory;
 	private static Queue subAttackQueue;
 	private static Queue guessesQueue;
+	private static boolean successfulRead = false;
 	
 	public MasterImpl(int m) { 
 		this.m = m;
+		readDictionary();
     }
 	
 	@Override
 	public Guess[] attack(byte[] ciphertext, byte[] knowntext) throws RemoteException, JsonSyntaxException, JMSException {
-		if(!readDictionary())
+		if(!successfulRead)
 			return null;
 		
 		int count = 0;
@@ -128,6 +130,7 @@ public class MasterImpl implements Master {
 			System.out.println("Erro na leitura do arquivo :(");
 			return false;
 		}
+		successfulRead = true;
 		return true;
 	}
 	
