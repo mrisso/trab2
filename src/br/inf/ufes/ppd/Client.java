@@ -68,8 +68,8 @@ public class Client {
 		byte[] vetorCriptografado = null;
 		byte[] byteArrayMessage = null;
 		byte[] myknowntext = null;
-//		long startTime = 0;
-//		long endTime = 0;
+		long startTime = 0;
+		long endTime = 0;
 		
 		Random randomNumber = new Random();
 		
@@ -144,11 +144,11 @@ public class Client {
 			
 			System.out.println("Cliente: Achei o mestre!");
 			
-			//startTime = System.nanoTime();
+			startTime = System.nanoTime();
 			Guess[] respostas = mestre.attack(vetorCriptografado, knowntext.getBytes());
-			//endTime = System.nanoTime();
+			endTime = System.nanoTime();
 			
-			//System.out.println("Tempo de Execucao: " + ((endTime - startTime)/1000000) + "ms");
+			System.out.println("Tempo de Execucao: " + ((endTime - startTime)/1000000) + "ms");
 				
 			if(respostas == null) {
 				System.out.println("O ataque nao pode ser realizado pois houve um erro na leitura do arquivo :(");
